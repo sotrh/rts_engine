@@ -39,13 +39,71 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    engine::DebugRenderer renderer;
+    engine::InputManager input(window);
+
+    engine::EntityRenderer renderer;
     renderer.init();
-    engine::World world(renderer);
+    engine::SelectionBoxRenderer selectionRenderer;
+    selectionRenderer.init();
+
+    engine::World world(renderer, selectionRenderer);
 
     double lastTime = glfwGetTime();
     double currentTime;
     double deltaTime;
+
+    bool isRightMouseButtonPressed = false;
+    bool isLeftMouseButtonPressed = false;
+    bool isSelecting = false;
+    float startX, startY, curX, curY;
+    engine::Selection selection(0, 0, 0, 0, 0);
+
+    input.registerKeyCallback([&](engine::InputManager* input, int key, int scancode, int action, int mods){
+        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    });
+
+    input.registerMouseButtonCallback([&](engine::InputManager* input, int button, int action, int mods) {
+        if (button == GLFW_MOUSE_BUTTON_LEFT) {
+            isLeftMouseButtonPressed = action == GLFW_PRESS;
+            if (!isLeftMouseButtonPressed) {
+                world.deselect(selection);
+                isSelecting = false;
+            }
+        } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+            if (!isRightMouseButtonPressed && action == GLFW_PRESS) {
+                world.addTarget(glm::vec3(curX / 800.0f * 2 - 1, 1 - curY / 600.0f * 2, 0.0f));
+            }
+            isRightMouseButtonPressed = action == GLFW_PRESS;
+        }
+    });
+
+    input.registerCursorPosCallback([&](engine::InputManager* input, double xpos, double ypos) {
+        curX = (float) xpos;
+        curY = (float) ypos;
+
+        if (isLeftMouseButtonPressed && !isSelecting) {
+            world.deselect(selection);
+            isSelecting = true;
+            startX = curX;
+            startY = curY;
+        } else if (!isLeftMouseButtonPressed) {
+            world.deselect(selection);
+            isSelecting = false;
+        }
+        
+        if (isSelecting) {
+            selection.minX = (startX < curX ? startX : curX) / 800.0f * 2 - 1;
+            selection.minY = 1 - (startY > curY ? startY : curY) / 600.0f * 2;
+            selection.maxX = (startX > curX ? startX : curX) / 800.0f * 2 - 1;
+            selection.maxY = 1 - (startY < curY ? startY : curY) / 600.0f * 2;
+            world.select(selection);
+        }
+    });
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     while (!glfwWindowShouldClose(window)) {
         glClearColor(0.2f, 0.3f, 0.4f, 1.0f);
@@ -62,6 +120,7 @@ int main(int argc, char** argv) {
     }
 
     renderer.cleanup();
+    selectionRenderer.cleanup();
 
     glfwDestroyWindow(window);
     glfwTerminate();
