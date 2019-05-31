@@ -7,13 +7,15 @@
 #include <queue>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <entityx/entityx.h>
 #include <map>
 
-#include "render.h"
+#include <render.h>
 
 namespace engine {
+    
     struct Position {
         Position(float x, float y, float z) : value(x, y, z) {}
         glm::vec3 value;
@@ -22,6 +24,14 @@ namespace engine {
     struct Velocity {
         Velocity(float x, float y, float z) : value(x, y, z) {}
         glm::vec3 value;
+    };
+
+    struct Sprite {
+        Sprite(std::string texture, float scale, float rotation) : texture(texture), scale(scale), rotation(rotation) {}
+
+        std::string texture;
+        float scale;
+        float rotation;
     };
 
     class MovementSystem : public entityx::System<MovementSystem> {
@@ -49,11 +59,31 @@ namespace engine {
         }
     };
 
+    class SpriteOrientationSystem : public entityx::System<SpriteOrientationSystem> {
+    public:
+        void update(entityx::EntityManager& es, entityx::EventManager& events, entityx::TimeDelta dt) override {
+            es.each<Sprite, Velocity>([this, dt](entityx::Entity entity, Sprite& sprite, Velocity& velocity) {
+                if (velocity.value.x == 0) {
+                } else {
+                    dummy = glm::normalize(velocity.value);
+                    sprite.rotation = (float) (atan(dummy.y / dummy.x) - M_PI_2);
+                }
+            });
+        }
+    private:
+        glm::vec3 dummy;
+    };
+
     struct Selection {
         Selection(uint cursor, float minX, float minY, float maxX, float maxY)
             : cursor(cursor), minX(minX), minY(minY), maxX(maxX), maxY(maxY) {}
         uint cursor;
         float minX, minY, maxX, maxY;
+    };
+
+    struct SelectionStartedEvent {
+        SelectionStartedEvent(Selection selection) : selection(selection) {}
+        Selection selection;
     };
 
     struct SelectionChangedEvent {
@@ -72,6 +102,7 @@ namespace engine {
             : renderer(renderer), selection(0, 0, 0, 0, 0), selectionColor(0, 1, 1, 0.1f) {}
 
         void configure(entityx::EventManager& eventManager) {
+            eventManager.subscribe<SelectionStartedEvent>(*this);
             eventManager.subscribe<SelectionChangedEvent>(*this);
             eventManager.subscribe<SelectionEndedEvent>(*this);
         }
@@ -97,9 +128,14 @@ namespace engine {
             }
         }
 
-        void receive(const SelectionChangedEvent &event) {
+        void receive(const SelectionStartedEvent &event) {
             selection = event.selection;
             isSelecting = true;
+            renderer.update(selection.minX, selection.minY, selection.maxX, selection.maxY);
+        }
+
+        void receive(const SelectionChangedEvent &event) {
+            selection = event.selection;
             renderer.update(selection.minX, selection.minY, selection.maxX, selection.maxY);
         }
 
@@ -190,47 +226,67 @@ namespace engine {
 
     class EntityRenderSystem : public entityx::System<EntityRenderSystem> {
     public:
-        EntityRenderSystem(EntityRenderer& renderer) : renderer(renderer) {}
+        EntityRenderSystem(EntityRenderer& renderer, TextureManager& textures) : renderer(renderer), textures(textures) {}
+
         void update(entityx::EntityManager& es, entityx::EventManager& events, entityx::TimeDelta dt) override {
             if (renderer.isInitialized()) {
                 renderer.use();
-                es.each<Position>([this](entityx::Entity entity, Position& position) {
-                    auto pos = position.value;
-                    glm::vec3 color(0.0f, 0.0f, 0.0f);
+                es.each<Position, Sprite>([this](entityx::Entity entity, Position& position, Sprite& sprite) {
+                    Texture* texture = textures.get(sprite.texture);
 
-                    if (entity.has_component<Selection>()) {
-                        color.g = color.b = 1.0f;
-                    } 
-                    if (entity.has_component<Job>()) {
-                        color.r = 1.0f;
+                    if (texture) {
+                        texture->use();
+                        glm::vec3 color(0.0f, 0.0f, 0.0f);
+
+                        if (entity.has_component<Selection>()) {
+                            color.g = color.b = 1.0f;
+                        } 
+                        if (entity.has_component<Job>()) {
+                            color.r = 1.0f;
+                        }
+
+                        glm::mat4 transform = glm::mat4(1.0f);
+                        transform = glm::translate(transform, position.value);
+                        transform = glm::rotate(transform, sprite.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
+                        transform = glm::scale(transform, glm::vec3(sprite.scale));
+
+                        renderer.render(transform, color);
+                    } else {
+                        std::cerr << "No texture found for '" << sprite.texture << "'" << std::endl;
+                        entity.remove<Sprite>();
                     }
-
-                    renderer.render(position.value, color);
                 });
             }
         }
     private:
         EntityRenderer& renderer;
+        TextureManager& textures;
     };
 
     class World : public entityx::EntityX {
     public:
-        World(EntityRenderer& renderer, SelectionBoxRenderer& selectionBoxRenderer) {
+        World(EntityRenderer& renderer, SelectionBoxRenderer& selectionBoxRenderer, TextureManager& textures) {
             systems.add<MovementSystem>();
+            systems.add<SpriteOrientationSystem>();
             systems.add<JobSystem>();
-            systems.add<EntityRenderSystem>(renderer);
+            systems.add<EntityRenderSystem>(renderer, textures);
             systems.add<SelectionSystem>(selectionBoxRenderer);
             systems.configure();
+
+            std::string texture = "res/ant.png";
+            textures.load(texture);
 
             for (uint u = 0; u < 10; u++) {
                 entityx::Entity entity = entities.create();
                 entity.assign<Position>((float) rand() / RAND_MAX - 0.5f, (float) rand() / RAND_MAX - 0.5f, 0.0f);
                 entity.assign<Velocity>(0.0f, 0.0f, 0.0f);
+                entity.assign<Sprite>(texture, 0.05f, (float) rand() / RAND_MAX * 2 - 1);
             }
         }
 
         void update(entityx::TimeDelta dt) {
             systems.update<MovementSystem>(dt);
+            systems.update<SpriteOrientationSystem>(dt);
             systems.update<JobSystem>(dt);
             systems.update<SelectionSystem>(dt);
             systems.update<EntityRenderSystem>(dt);
@@ -240,11 +296,15 @@ namespace engine {
             events.emit<JobAddedEvent>(Job(target));
         }
 
-        void select(Selection selection) {
+        void startSelection(Selection selection) {
+            events.emit<SelectionStartedEvent>(selection);
+        }
+
+        void changeSelection(Selection selection) {
             events.emit<SelectionChangedEvent>(selection);
         }
 
-        void deselect(Selection selection) {
+        void stopSelection(Selection selection) {
             events.emit<SelectionEndedEvent>(selection);
         }
     };

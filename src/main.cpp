@@ -8,6 +8,13 @@
 
 #include "engine.h"
 
+void updateSelection(engine::Selection& selection, double dragStartX, double dragStartY, double dragEndX, double dragEndY) {
+    selection.minX = (dragStartX < dragEndX ? dragStartX : dragEndX) / 800.0f * 2 - 1;
+    selection.minY = 1 - (dragStartY > dragEndY ? dragStartY : dragEndY) / 600.0f * 2;
+    selection.maxX = (dragStartX > dragEndX ? dragStartX : dragEndX) / 800.0f * 2 - 1;
+    selection.maxY = 1 - (dragStartY < dragEndY ? dragStartY : dragEndY) / 600.0f * 2;
+}
+
 int main(int argc, char** argv) {
     glfwSetErrorCallback([](int error, const char* description) {
         std::cerr << "GLFW Error (" << error << "):\n" << description << std::endl;
@@ -40,20 +47,20 @@ int main(int argc, char** argv) {
     }
 
     engine::InputManager input(window);
+    engine::TextureManager textures;
 
     engine::EntityRenderer renderer;
     renderer.init();
     engine::SelectionBoxRenderer selectionRenderer;
     selectionRenderer.init();
 
-    engine::World world(renderer, selectionRenderer);
+    engine::World world(renderer, selectionRenderer, textures);
 
     double lastTime = glfwGetTime();
     double currentTime;
     double deltaTime;
 
     bool isRightMouseButtonPressed = false;
-    bool isLeftMouseButtonPressed = false;
     bool isSelecting = false;
     float startX, startY, curX, curY;
     engine::Selection selection(0, 0, 0, 0, 0);
@@ -65,13 +72,7 @@ int main(int argc, char** argv) {
     });
 
     input.registerMouseButtonCallback([&](engine::InputManager* input, int button, int action, int mods) {
-        if (button == GLFW_MOUSE_BUTTON_LEFT) {
-            isLeftMouseButtonPressed = action == GLFW_PRESS;
-            if (!isLeftMouseButtonPressed) {
-                world.deselect(selection);
-                isSelecting = false;
-            }
-        } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (button == GLFW_MOUSE_BUTTON_RIGHT) {
             if (!isRightMouseButtonPressed && action == GLFW_PRESS) {
                 world.addTarget(glm::vec3(curX / 800.0f * 2 - 1, 1 - curY / 600.0f * 2, 0.0f));
             }
@@ -82,24 +83,21 @@ int main(int argc, char** argv) {
     input.registerCursorPosCallback([&](engine::InputManager* input, double xpos, double ypos) {
         curX = (float) xpos;
         curY = (float) ypos;
+    });
 
-        if (isLeftMouseButtonPressed && !isSelecting) {
-            world.deselect(selection);
-            isSelecting = true;
-            startX = curX;
-            startY = curY;
-        } else if (!isLeftMouseButtonPressed) {
-            world.deselect(selection);
-            isSelecting = false;
-        }
-        
-        if (isSelecting) {
-            selection.minX = (startX < curX ? startX : curX) / 800.0f * 2 - 1;
-            selection.minY = 1 - (startY > curY ? startY : curY) / 600.0f * 2;
-            selection.maxX = (startX > curX ? startX : curX) / 800.0f * 2 - 1;
-            selection.maxY = 1 - (startY < curY ? startY : curY) / 600.0f * 2;
-            world.select(selection);
-        }
+    input.registerDragStartedCallback([&selection, &world](engine::InputManager* input, double startedX, double startedY, double endedX, double endedY) {
+        updateSelection(selection, startedX, startedY, endedX, endedY);
+        world.startSelection(selection);
+    });
+
+    input.registerDragMovedCallback([&selection, &world](engine::InputManager* input, double startedX, double startedY, double endedX, double endedY) {
+        updateSelection(selection, startedX, startedY, endedX, endedY);
+        world.changeSelection(selection);
+    });
+
+    input.registerDragEndedCallback([&selection, &world](engine::InputManager* input, double startedX, double startedY, double endedX, double endedY) {
+        updateSelection(selection, startedX, startedY, endedX, endedY);
+        world.stopSelection(selection);
     });
 
     glEnable(GL_BLEND);
@@ -119,6 +117,7 @@ int main(int argc, char** argv) {
         glfwSwapBuffers(window);
     }
 
+    textures.cleanup();
     renderer.cleanup();
     selectionRenderer.cleanup();
 

@@ -4,6 +4,10 @@
 #include <iostream>
 #include <glad/glad.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <texture.h>
+
+#include <entityx/entityx.h>
 
 namespace engine {
 
@@ -136,9 +140,15 @@ namespace engine {
             cleanup();
 
             float vertices[] = {
-                -0.02f, -0.02f, 0.0f,
-                0.02f, -0.02f, 0.0f,
-                0.0f,  0.02f, 0.0f,
+                -0.5f, -0.5f, 0.0f, 0.0f, 1.0f,
+                0.5f, -0.5f, 0.0f, 1.0f, 1.0f,
+                0.5f, 0.5f, 0.0f, 1.0f, 0.0f,
+                -0.5f, 0.5f, 0.0f, 0.0f, 0.0f,
+            };
+
+            ushort indices[] = {
+                0, 1, 2,
+                0, 2, 3,
             };
 
             glGenVertexArrays(1, &_vao);
@@ -147,7 +157,13 @@ namespace engine {
             glBindBuffer(GL_ARRAY_BUFFER, _vbo);
             glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
             glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, 0);
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void*) (sizeof(float) * 3));
+
+            glGenBuffers(1, &_ebo);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
             unsigned int vs, fs;
             vs = glCreateShader(GL_VERTEX_SHADER);
@@ -155,11 +171,16 @@ namespace engine {
                 #version 330 core
 
                 layout(location=0) in vec3 aPosition;
+                layout(location=1) in vec2 aTexCoord;
+
+                out vec2 vTexCoord;
 
                 uniform vec3 uPosition;
+                uniform mat4 uTransform;
 
                 void main() {
-                    gl_Position = vec4(aPosition + uPosition, 1.0);
+                    gl_Position = uTransform * vec4(aPosition, 1.0);
+                    vTexCoord = aTexCoord;
                 }
             )";
             glShaderSource(vs, 1, &vsSource, nullptr);
@@ -177,12 +198,14 @@ namespace engine {
             auto fsSource = R"(
                 #version 330 core
 
+                in vec2 vTexCoord;
                 out vec4 fColor;
 
                 uniform vec3 uColor;
+                uniform sampler2D uTexture;
 
                 void main() {
-                    fColor = vec4(uColor, 1.0);
+                    fColor = vec4(uColor, 1.0) * texture(uTexture, vTexCoord);
                 }
             )";
             glShaderSource(fs, 1, &fsSource, nullptr);
@@ -216,13 +239,16 @@ namespace engine {
             if (_vbo) {
                 glDeleteBuffers(1, &_vbo);
             }
+            if (_ebo) {
+                glDeleteBuffers(1, &_ebo);
+            }
             if (_vao) {
                 glDeleteVertexArrays(1, &_vao);
             }
             if (_program) {
                 glDeleteProgram(_program);
             }
-            _vbo = _vao = _program = 0;
+            _vbo = _ebo = _vao = _program = 0;
         }
 
         void use() {
@@ -230,10 +256,10 @@ namespace engine {
             glBindVertexArray(_vao);
         }
 
-        void render(glm::vec3& position, glm::vec3& color) {
-            glUniform3f(glGetUniformLocation(_program, "uPosition"), position.x, position.y, position.z);
+        void render(glm::mat4& transform, glm::vec3& color) {
+            glUniformMatrix4fv(glGetUniformLocation(_program, "uTransform"), 1, GL_FALSE, glm::value_ptr(transform));
             glUniform3f(glGetUniformLocation(_program, "uColor"), color.x, color.y, color.z);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr);
         }
 
         bool isInitialized() {
@@ -241,7 +267,7 @@ namespace engine {
         }
 
     private:
-        uint _vao, _vbo, _program;
+        uint _vao, _vbo, _ebo, _program;
         bool _isInitialized = false;
     };
 }

@@ -13,7 +13,7 @@ add_subdirectory(libs/entityx)
 
 add_subdirectory(libs/glm)
 
-include_directories(include)
+include_directories(include libs/stb/include)
 add_executable(game src/main.cpp)
 target_link_libraries(game PRIVATE glfw)
 target_link_libraries(game PRIVATE glfw)
