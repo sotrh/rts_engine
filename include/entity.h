@@ -196,8 +196,9 @@ namespace engine {
 
                 bool jobTaken = false;
                 for (entityx::Entity entity : es.entities_with_components(position, velocity, selection)) {
-                    if (entity.has_component<Job>()) continue;
-
+                    if (entity.has_component<Job>()) {    
+                        entity.remove<Job>();
+                    }
                     auto job = jobQueue.front().job;
                     entity.assign_from_copy<Job>(job);
                     jobTaken = true;
