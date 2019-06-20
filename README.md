@@ -1,6 +1,6 @@
 ## Getting things to work
 ```bash
-# in the root directory
+# in the root directory of the project
 unzip libs.zip
 
 mkdir build
